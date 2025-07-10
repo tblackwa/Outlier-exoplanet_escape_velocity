@@ -1,4 +1,15 @@
 import requests
+import pyvo as vo
+import sys
+
+# Basic pyVO implementation to extract VO tables from exoplanet tables
+def get_vo_exodataset():
+    nasa_tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP"
+    tap_service = vo.dal.TAPService(nasa_tap_url)
+
+    ADQL_query = "SELECT TOP 5 pl_name, pl_rade, pl_bmasse FROM pscomppars WHERE sy_pnum=1"
+    result = tap_service.search(ADQL_query)
+    print(result)
 
 def get_exodataset(select_strs, table_name, where_dict, select_specified_rows=0):
     """
@@ -118,5 +129,8 @@ if __name__ == "__main__":
                   "pl_ntranspec": "2"}
 
     # Get dataset and calculate escape velocities with dataset
-    output_response = get_exodataset(select_args, nasa_table, where_args, select_specified_rows=5)
-    calc_escape_velocity(output_response, earth_units_flag=True)
+    # output_response = get_exodataset(select_args, nasa_table, where_args, select_specified_rows=5)
+    # calc_escape_velocity(output_response, earth_units_flag=True)
+
+    # Testing pyVO service
+    get_vo_exodataset()
