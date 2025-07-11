@@ -1,4 +1,28 @@
+import numpy as np
 import requests
+import pyvo as vo
+import sys
+
+def get_vo_exodataset(ADQL_query):
+    """
+    PyVO implementation to access NASA Exoplanet Archive tables with TAP. Involves connecting
+    to the NASA TAP endpoint with PyVO, and then provide the ADQL query as an arg. Simplifies
+    much of the fetching and produces a DALTable rather than a JSON response.
+
+    :param ADQL_query: The ADQL query used to access specific areas of data within the Exoplanet Archive database.
+    :return: An astropy table consisting of the exoplanet's and their data fetched from the ADQL query.
+    """
+    # Make TAP query
+    nasa_tap_url = "https://exoplanetarchive.ipac.caltech.edu/TAP"
+    tap_service = vo.dal.TAPService(nasa_tap_url)
+
+    # Change DALtable from query to astropy table
+    result = tap_service.search(ADQL_query)
+    astro_table = result.to_table()
+
+    # TODO: Clean rows and columns for any masked values/columns
+
+    return astro_table
 
 def get_exodataset(select_strs, table_name, where_dict, select_specified_rows=0):
     """
@@ -46,77 +70,92 @@ def get_exodataset(select_strs, table_name, where_dict, select_specified_rows=0)
 
     # Send the request
     response = requests.get(url, headers=headers)
+    results = None
     print("Finished getting request")
 
-    return response
 
-def calc_escape_velocity(response, earth_units_flag=True):
-    """
-    Calculates each exoplanet's escape velocity within the JSON response using the exoplanet's radius
-    in Earth radius units and the exoplanet's mass in Earth mass units. The response will have at least key entries
-    'pl_name', 'pl_rade', 'pl_bmasse', 'pl_radj', and 'pl_bmassj'. Here's the description of these keys:
-
-    'pl_name': Exoplanet name
-    'pl_rade': Exoplanet's radius in units of Earth's radius
-    'pl_bmasse': Exoplanet's mass in units of Earth's mass
-    'pl_radj': Exoplanet's radius in units of Jupiter's radius
-    'pl_bmassj': Exoplanet's mass in units of Jupiter's mass
-
-    :param response: JSON containing exoplanet data derived from SQL query on NASA datatable. Has keys such as
-                     'pl_radj' and 'pl_bmassj'
-    :param earth_units_flag: Bool used to calculate which conversion variable to use for exoplanet's radius and mass.
-                             If true, convert the radius and mass from Earth's mass and radius units,
-                             else, convert the radius and mass from Jupiter's mass and radius units
-    :return: Dictionary of exoplanet names (keys) and their escape velocities (values)
-    """
-
-    # Check the response status code
+    # Handle response status code
     if response.status_code == 200:
         # Get results from the response
         results = response.json()
-
-        # Create a list to store the planet data
-        planet_data = []
-
-        # Define the constants needed for escape velocity computation
-        earth_mass = 5.97219 * 10 ** 24
-        earth_radius = 6.371 * 10 ** 6
-        jupiter_mass = 1.89813 * 10 ** 27
-        jupiter_radius = 6.9911 * 10 ** 7
-        g = 6.674 * 10 ** -11
-
-        # Loop through the results
-        for i in range(min(len(results), 10)):
-            # Get the planet data
-            planet = results[i]
-
-            # Get the radius and mass of the planet and convert them with Earth or Jupiter units
-            if earth_units_flag:
-                mass = planet["pl_bmasse"] * earth_mass
-                radius = planet["pl_rade"] * earth_radius
-            else:
-                mass = planet["pl_bmassj"] * jupiter_mass
-                radius = planet["pl_radj"] * jupiter_radius
-
-            # Calculate escape velocity and change units from m/s to km/s
-            escape_velocity = (2*g*mass/radius) ** (1/2)
-            escape_velocity /= 1000
-
-            # Append the data to the list
-            planet_data.append([planet["pl_name"], escape_velocity])
-
-        # Print the planet data
-        print(planet_data)
     else:
         print(f"Error: {response.status_code}")
+        sys.exit(1)
+
+    #TODO: Overall, clean JSON exoplanet data of any missing values/NaN
+    #TODO: I.e., Remove specific exoplanet data (rows/keys) from JSON once missing values are detected
+
+    return results
+
+def calc_escape_velocity(results, earth_units_flag=True):
+    """
+    Calculates each exoplanet's escape velocity with the provided JSON/astropy table using the exoplanet's radius
+    in Earth radius units and the exoplanet's mass in Earth mass units. The results will have at least key entries
+    'pl_name', 'pl_rade', 'pl_bmasse', 'pl_radj', and 'pl_bmassj'. Here's the description of these keys:
+
+    - 'pl_name': Exoplanet name
+    - 'pl_rade': Exoplanet's radius in units of Earth's radius
+    - 'pl_bmasse': Exoplanet's mass in units of Earth's mass
+    - 'pl_radj': Exoplanet's radius in units of Jupiter's radius
+    - 'pl_bmassj': Exoplanet's mass in units of Jupiter's mass
+
+    :param results: JSON or astropy table containing exoplanet data derived from SQL query on NASA datatable.
+                    Has keys such as 'pl_radj' and 'pl_bmassj'.
+    :param earth_units_flag: Bool used to calculate which conversion variable to use for exoplanet's radius and mass.
+                             If true, convert the radius and mass from Earth's mass and radius units,
+                             else, convert the radius and mass from Jupiter's mass and radius units.
+    :return: 2D List of exoplanet names and their escape velocities.
+    """
+
+    # Define the constants needed for escape velocity computation
+    earth_mass = 5.97219 * 10 ** 24
+    earth_radius = 6.371 * 10 ** 6
+    jupiter_mass = 1.89813 * 10 ** 27
+    jupiter_radius = 6.9911 * 10 ** 7
+    g = 6.674 * 10 ** -11
+
+    planet_data = []
+    for i in range(len(results)):
+        # Get the planet data
+        planet = results[i]
+
+        # Get the radius and mass of the planet and convert them with Earth or Jupiter units
+        if earth_units_flag:
+            mass = planet["pl_bmasse"] * earth_mass
+            radius = planet["pl_rade"] * earth_radius
+        else:
+            mass = planet["pl_bmassj"] * jupiter_mass
+            radius = planet["pl_radj"] * jupiter_radius
+
+        # Calculate escape velocity and change units from m/s to km/s
+        escape_velocity = (2*g*mass/radius) ** (1/2)
+        escape_velocity /= 1000
+
+        # Type check velocity is a np.float
+        # If not, update to a np.float to maintain consistency between requests and PyVO methods
+        if not isinstance(escape_velocity, np.floating):
+            escape_velocity = np.float64(escape_velocity)
+
+        planet_data.append([planet["pl_name"], escape_velocity])
+
+    print(planet_data)
 
 if __name__ == "__main__":
-    # Provide the strings needed to create a SQL query on a NASA database
+    # Provide the strings needed to create a ADQL query on a NASA database for requests method
     select_args = ["pl_name", "pl_rade", "pl_radj", "pl_bmasse", "pl_bmassj"]
     nasa_table = "pscomppars"
     where_args = {"sy_pnum": "1",
                   "pl_ntranspec": "2"}
 
-    # Get dataset and calculate escape velocities with dataset
-    output_response = get_exodataset(select_args, nasa_table, where_args, select_specified_rows=5)
-    calc_escape_velocity(output_response, earth_units_flag=True)
+    # Provide ADQL query for pyvo method
+    query = "SELECT TOP 5 pl_name, pl_rade, pl_bmasse FROM pscomppars WHERE sy_pnum=1 AND pl_ntranspec=2"
+
+    # True = use pyvo method, False = use requests method
+    use_pyvo = False
+
+    if use_pyvo is True:
+        exo_table = get_vo_exodataset(query)
+        calc_escape_velocity(exo_table, earth_units_flag=True)
+    else:
+        json_results = get_exodataset(select_args, nasa_table, where_args, select_specified_rows=5)
+        calc_escape_velocity(json_results, earth_units_flag=True)
